@@ -9,15 +9,19 @@ import ctypes
 from contextlib import contextmanager
 
 from AnyQt.QtWidgets import (
-    QWidget, QMessageBox, QStyleOption, QStyle, QTextEdit, QScrollBar
+    QWidget, QMessageBox, QStyleOption, QStyle, QTextEdit, QScrollBar,
+    QApplication
 )
 from AnyQt.QtGui import (
     QGradient, QLinearGradient, QRadialGradient, QBrush, QPainter,
-    QPaintEvent, QColor, QPixmap, QPixmapCache, QTextOption
+    QPaintEvent, QColor, QPixmap, QPixmapCache, QTextOption,
+    QPalette
 )
 from AnyQt.QtCore import Qt, QPointF, QPoint, QRect, QRectF, Signal, QEvent
 
 import sip
+
+from orangecanvas.registry import NAMED_COLORS, DEFAULT_COLOR
 
 
 @contextmanager
@@ -188,6 +192,133 @@ def brush_darker(brush: QBrush, factor: bool) -> QBrush:
         brush = QBrush(brush)
         brush.setColor(brush.color().darker(factor))
         return brush
+
+
+def relative_luminance(color: QColor):
+    vR = color.redF()
+    vG = color.greenF()
+    vB = color.blueF()
+
+    def sRGBtoLin(c):
+        if c <= 0.04045:
+            return c / 12.92
+        else:
+            return pow(((c + 0.055) / 1.055), 2.4)
+
+    Y = (0.2126 * sRGBtoLin(vR) +
+         0.7152 * sRGBtoLin(vG) +
+         0.0722 * sRGBtoLin(vB))
+
+    return Y
+
+
+def lstar(color):
+    Y = relative_luminance(color)
+    if Y <= 216 / 24389:
+        Lstar = Y * (24389 / 27)
+    else:
+        Lstar = pow(Y, (1 / 3)) * 116 - 16
+
+    return Lstar
+
+
+def contrast_ratio(c1, c2):
+    v1 = relative_luminance(c1)
+    v2 = relative_luminance(c2)
+    if v1 < v2:
+        _ = v2
+        v2 = v1
+        v1 = _
+    return (v1 + 0.05) / (v2 + 0.05)
+
+
+def foreground_for_background(bg: QColor):
+    if lstar(bg) < 50:
+        return QColor(Qt.white)
+    else:
+        return QColor(Qt.black)
+
+
+def saturated(color, factor=150):
+    # type: (QColor, int) -> QColor
+    """Return a saturated color.
+    """
+    h = color.hsvHueF()
+    s = color.hsvSaturationF()
+    v = color.valueF()
+    a = color.alphaF()
+    s = factor * s / 100.0
+    s = max(min(1.0, s), 0.0)
+    return QColor.fromHsvF(h, s, v, a).convertTo(color.spec())
+
+
+def create_palette(background):
+    # type: (Any) -> QPalette
+    """
+    Return a new :class:`QPalette` from for the :class:`NodeBodyItem`.
+    """
+    app = QApplication.instance()
+    darkMode = app.property('darkMode')
+
+    defaults = {
+        # Canvas widget background radial gradient
+        QPalette.Light:
+            lambda color: saturated(color, 50),
+        QPalette.Midlight:
+            lambda color: saturated(color, 90),
+        QPalette.Button:
+            lambda color: color,
+        # Canvas widget shadow
+        QPalette.Shadow:
+            lambda color: saturated(color, 125) if darkMode else
+                          saturated(color, 150),
+
+        # Category tab color
+        QPalette.Highlight:
+            lambda color: color,
+
+        QPalette.HighlightedText:
+            lambda color: foreground_for_background(color),
+    }
+
+    palette = QPalette()
+
+    if isinstance(background, dict):
+        if app.property('darkMode'):
+            background = background.get('dark', next(iter(background.values())))
+        else:
+            background = background.get('light', next(iter(background.values())))
+        base_color = background[QPalette.Button]
+        base_color = QColor(base_color)
+    else:
+        color = NAMED_COLORS.get(background, background)
+        color = QColor(background)
+        if color.isValid():
+            base_color = color
+        else:
+            color = NAMED_COLORS[DEFAULT_COLOR]
+            base_color = QColor(color)
+
+    for role, default in defaults.items():
+        if isinstance(background, dict) and role in background:
+            v = background[role]
+            color = NAMED_COLORS.get(v, v)
+            color = QColor(color)
+            if color.isValid():
+                palette.setColor(role, color)
+                continue
+        color = default(base_color)
+        palette.setColor(role, color)
+
+    return palette
+
+
+def default_palette():
+    # type: () -> QPalette
+    """
+    Create and return a default palette for a node.
+    """
+    return create_palette(DEFAULT_COLOR)
 
 
 def create_gradient(base_color: QColor, stop=QPointF(0, 0),
