@@ -10,7 +10,7 @@ from AnyQt.QtGui import (
     QColor, QRadialGradient, QPainterPathStroker, QPainterPath, QPen
 )
 
-from AnyQt.QtWidgets import QGraphicsItem
+from orangecanvas.gui.utils import saturated
 
 if typing.TYPE_CHECKING:
     T = typing.TypeVar("T")
@@ -93,20 +93,7 @@ def sample_path(path, num=10):
     return [path.pointAtPercent(p) for p in linspace(num)]
 
 
-def saturated(color, factor=150):
-    # type: (QColor, int) -> QColor
-    """Return a saturated color.
-    """
-    h = color.hsvHueF()
-    s = color.hsvSaturationF()
-    v = color.valueF()
-    a = color.alphaF()
-    s = factor * s / 100.0
-    s = max(min(1.0, s), 0.0)
-    return QColor.fromHsvF(h, s, v, a).convertTo(color.spec())
-
-
-def radial_gradient(color, color_light=50):
+def radial_gradient(color, color_light=50, color_lightest=50):
     # type: (QColor, Union[int, QColor]) -> QRadialGradient
     """
     radial_gradient(QColor, QColor)
@@ -119,9 +106,11 @@ def radial_gradient(color, color_light=50):
     """
     if not isinstance(color_light, QColor):
         color_light = saturated(color, color_light)
+    if not isinstance(color_lightest, QColor):
+        color_lightest = saturated(color, color_lightest)
     gradient = QRadialGradient(0.5, 0.5, 0.5)
-    gradient.setColorAt(0.0, color_light)
-    gradient.setColorAt(0.5, color_light)
+    gradient.setColorAt(0.0, color_lightest)
+    gradient.setColorAt(0.8, color_light)
     gradient.setColorAt(1.0, color)
     gradient.setCoordinateMode(QRadialGradient.ObjectBoundingMode)
     return gradient
